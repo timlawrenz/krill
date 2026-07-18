@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=75.8", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "krill"
+version = "0.1.0"
+description = "Fish shell completion engine — man pages, sandbox agents, and feedback loops"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "Tim Lawrenz"},
+]
+keywords = ["fish", "shell", "completion", "autocomplete", "man-page"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: System :: Shells",
+    "Topic :: System :: Systems Administration",
+]
+
+[project.scripts]
+krill = "krill.cli:main"
+
+[project.optional-dependencies]
+sandbox = ["docker>=7.0"]
+dev = ["pytest>=8", "ruff>=0.8"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
