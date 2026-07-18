@@ -12,6 +12,7 @@ Example output for `tar`:
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,10 @@ def _generate_option_line(command: str, opt: dict[str, Any]) -> str:
     typ = opt.get("type", "boolean")
     desc = opt.get("description", "")
     required = opt.get("required", False)
+
+    # Skip invalid short flags (fish treats # as comment, etc.)
+    if short and not re.match(r'^-[a-zA-Z0-9]$', short):
+        short = ""
 
     if short:
         parts.append(f"-s {short.lstrip('-')}")
@@ -85,6 +90,7 @@ def write_completion_files(
     catalog: Catalog,
     output_dir: str | Path,
     *,
+    overwrite: bool = False,
     commands: list[str] | None = None,
 ) -> list[Path]:
     """Generate and write completion files for all catalogued commands.
@@ -92,7 +98,8 @@ def write_completion_files(
     Args:
         catalog: The catalog database.
         output_dir: Directory to write .fish files to (typically
-                    ~/.cache/fish/generated_completions/).
+                    ~/.config/fish/completions/).
+        overwrite: If False (default), skip files that already exist.
         commands: Specific commands to generate. If None, generates for all.
 
     Returns:
@@ -102,25 +109,32 @@ def write_completion_files(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     written: list[Path] = []
+    skipped: list[str] = []
 
     # If no specific commands, get all from catalog
     if commands is None:
-        import sqlite3
-        rows = catalog.conn.execute(
-            "SELECT DISTINCT command_path FROM help_catalog WHERE subcommands IS NULL OR subcommands = '[]'"
-        ).fetchall()
-        commands = [r["command_path"] for r in rows]
+        commands = catalog.list_all_commands()
 
     for cmd in commands:
+        filepath = output_dir / f"{cmd}.fish"
+
+        # Skip existing files unless --force
+        if not overwrite and filepath.exists():
+            skipped.append(cmd)
+            continue
+
         opts = catalog.get_options(cmd)
         subs = catalog.get_subcommands(cmd)
         if opts is None:
             continue
 
         content = generate_completion_file(cmd, opts, subs)
-        filepath = output_dir / f"{cmd}.fish"
         filepath.write_text(content)
         written.append(filepath)
+
+    if skipped:
+        import sys
+        print(f"Skipped {len(skipped)} existing files (use --force to overwrite)", file=sys.stderr)
 
     return written
 

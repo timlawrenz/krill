@@ -22,14 +22,21 @@ def cmd_update(args: argparse.Namespace) -> int:
     output_dir = Path(args.output_dir)
     catalog = Catalog(explainshell_db=args.explainshell_db)
 
-    written = write_completion_files(catalog, output_dir)
+    written = write_completion_files(
+        catalog, output_dir,
+        overwrite=args.force,
+        commands=args.commands if args.commands else None,
+    )
 
     if written:
         print(f"Generated {len(written)} completion files in {output_dir}")
         for f in written:
             print(f"  {f.name}")
     else:
-        print("No completions in catalog. Run 'krill extract <command>' first.", file=sys.stderr)
+        msg = "No new completions generated"
+        if not args.force:
+            msg += " (all files already exist, use --force to overwrite)"
+        print(msg, file=sys.stderr)
 
     catalog.close()
     return 0
@@ -97,13 +104,22 @@ def main() -> None:
     update = sub.add_parser("update", help="Refresh all completion files")
     update.add_argument(
         "-o", "--output-dir",
-        default=str(Path.home() / ".cache" / "fish" / "generated_completions"),
-        help="Output directory for .fish files",
+        default=str(Path.home() / ".config" / "fish" / "completions"),
+        help="Output directory for .fish files (default: ~/.config/fish/completions/)",
     )
     update.add_argument(
         "--explainshell-db",
         default=None,
         help="Path to explainshell SQLite DB (optional)",
+    )
+    update.add_argument(
+        "-f", "--force",
+        action="store_true",
+        help="Overwrite existing completion files",
+    )
+    update.add_argument(
+        "commands", nargs="*",
+        help="Specific commands to generate (default: all)",
     )
     update.set_defaults(func=cmd_update)
 
