@@ -8,5 +8,6 @@ build/
 venv/
 .env
 *.db
+*.db.zst
 .pytest_cache/
 .ruff_cache/

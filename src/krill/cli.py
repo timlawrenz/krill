@@ -20,7 +20,7 @@ from krill.sandbox import extract_options
 def cmd_update(args: argparse.Namespace) -> int:
     """Refresh all completion files from the catalog."""
     output_dir = Path(args.output_dir)
-    catalog = Catalog()
+    catalog = Catalog(explainshell_db=args.explainshell_db)
 
     written = write_completion_files(catalog, output_dir)
 
@@ -99,6 +99,11 @@ def main() -> None:
         "-o", "--output-dir",
         default=str(Path.home() / ".cache" / "fish" / "generated_completions"),
         help="Output directory for .fish files",
+    )
+    update.add_argument(
+        "--explainshell-db",
+        default=None,
+        help="Path to explainshell SQLite DB (optional)",
     )
     update.set_defaults(func=cmd_update)
 
