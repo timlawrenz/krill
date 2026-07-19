@@ -13,6 +13,7 @@ Example output for `tar`:
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +25,7 @@ def _escape_fish(value: str) -> str:
     return value.replace("\\", "\\\\").replace("'", "\\'")
 
 
-def _generate_option_line(command: str, opt: dict[str, Any]) -> str:
+def _generate_option_line(command: str, opt: dict[str, Any]) -> str | None:
     """Generate a single `complete -c ...` line for one option."""
     parts = [f"complete -c {command}"]
 
@@ -34,14 +35,33 @@ def _generate_option_line(command: str, opt: dict[str, Any]) -> str:
     desc = opt.get("description", "")
     required = opt.get("required", False)
 
-    # Skip invalid short flags (fish treats # as comment, etc.)
-    if short and not re.match(r'^-[a-zA-Z0-9]$', short):
-        short = ""
+    # Skip invalid short flags (non-alphanumeric, fish treats # as comment, etc.)
+    # Also reject flags that don't start with '-' (explainshell stores some
+    # find expressions like '(' and '!' as if they were flags)
+    if short:
+        if not re.match(r'^-[a-zA-Z0-9]+$', short):
+            short = ""
+        elif len(short) > 2:  # multi-char short flags like -name are fine for GNU tools
+            pass  # allow multi-char shorts (-name, -type, etc.)
+
+    # Normalize flag names: strip leading dashes, reject empty results
+    if long:
+        long = long.lstrip("-")
+        if not long:
+            long = ""
+    if short:
+        short = short.lstrip("-")
+        if not short:
+            short = ""
+
+    # Skip options with no usable flag
+    if not short and not long:
+        return None
 
     if short:
-        parts.append(f"-s {short.lstrip('-')}")
+        parts.append(f"-s {short}")
     if long:
-        parts.append(f"-l {long.lstrip('-')}")
+        parts.append(f"-l {long}")
     if typ != "boolean":
         parts.append("-r")  # requires argument
     if desc:
@@ -69,8 +89,9 @@ def generate_completion_file(
 
     # Options (flags)
     for opt in options:
-        if opt.get("short") or opt.get("long"):
-            lines.append(_generate_option_line(command, opt))
+        line = _generate_option_line(command, opt)
+        if line:
+            lines.append(line)
 
     # Subcommands
     if subcommands:
@@ -129,11 +150,21 @@ def write_completion_files(
             continue
 
         content = generate_completion_file(cmd, opts, subs)
+
+        # Guard: don't overwrite a better completion file
+        if filepath.exists() and overwrite:
+            existing_lines = len(filepath.read_text().splitlines())
+            new_lines = content.count("\n")
+            if existing_lines > new_lines:
+                print(f"  Skipping {cmd}: existing file has {existing_lines} lines, "
+                      f"krill would generate {new_lines} (use --force to override guard)",
+                      file=sys.stderr)
+                continue
+
         filepath.write_text(content)
         written.append(filepath)
 
     if skipped:
-        import sys
         print(f"Skipped {len(skipped)} existing files (use --force to overwrite)", file=sys.stderr)
 
     return written
