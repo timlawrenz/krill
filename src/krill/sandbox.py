@@ -1,7 +1,7 @@
 """Sandbox agent — safely execute `command --help` and extract option schemas.
 
-Runs commands in a container (Docker/Podman) to extract --help output,
-then parses it into the machine-readable option format used by the catalog.
+Runs commands locally with a short timeout (help output is read-only),
+then parses output into the machine-readable option format used by the catalog.
 
 Deterministic parser first (handles argparse, click, cobra, docopt formats),
 LLM fallback for non-standard help output.
@@ -9,7 +9,6 @@ LLM fallback for non-standard help output.
 
 from __future__ import annotations
 
-import json
 import subprocess
 from dataclasses import dataclass, field
 from typing import Any
@@ -26,48 +25,29 @@ class ExtractionResult:
     raw_help: str = ""
 
 
-def run_in_sandbox(command: str, args: list[str] | None = None) -> str:
-    """Run a command in a sandbox container and return its stdout.
+def run_command_help(command: str, args: list[str] | None = None) -> str:
+    """Run `command --help` locally with a short timeout and return stdout.
 
-    Uses `docker run` with a minimal alpine image. The container
-    should be pre-built with common toolchains installed.
-
-    Falls back to local execution if Docker is unavailable.
+    Help output is read-only — no filesystem mutation expected.
+    A 5-second timeout prevents hangs.
 
     Args:
-        command: The command to run (e.g., "heroku")
+        command: The command to run (e.g., "heroku", "pip")
         args: Additional arguments (defaults to ["--help"])
 
     Returns:
-        stdout from the command.
+        stdout + stderr from the command, or empty string on failure.
     """
     if args is None:
         args = ["--help"]
 
-    # Try Docker first
-    try:
-        result = subprocess.run(
-            [
-                "docker", "run", "--rm",
-                "krill-sandbox",  # pre-built image
-                command, *args,
-            ],
-            capture_output=True, text=True, timeout=30,
-        )
-        if result.returncode == 0:
-            return result.stdout
-        return result.stderr
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
-
-    # Fall back to local execution (less safe but works)
     try:
         result = subprocess.run(
             [command, *args],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, timeout=5,
         )
         return result.stdout or result.stderr
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
         return ""
 
 
@@ -268,14 +248,16 @@ def extract_options(command_path: str) -> ExtractionResult:
     Returns:
         ExtractionResult with parsed options and subcommands.
     """
+    from krill.subcommands import parse_subcommands
+
     # Convert dotted path to command args
     parts = command_path.split(".")
     base_cmd = parts[0]
     subcmd_args = parts[1:] if len(parts) > 1 else []
 
-    help_text = run_in_sandbox(base_cmd, subcmd_args + ["--help"])
+    help_text = run_command_help(base_cmd, subcmd_args + ["--help"])
     if not help_text:
-        help_text = run_in_sandbox(base_cmd, subcmd_args + ["-h"])
+        help_text = run_command_help(base_cmd, subcmd_args + ["-h"])
 
     result = ExtractionResult(
         command_path=command_path,
@@ -285,7 +267,7 @@ def extract_options(command_path: str) -> ExtractionResult:
     if not help_text:
         return result
 
-    # Try deterministic parsers
+    # Try deterministic flag parsers
     parsed = (
         parse_argparse_style(help_text)
         or parse_click_style(help_text)
@@ -293,7 +275,11 @@ def extract_options(command_path: str) -> ExtractionResult:
 
     if parsed:
         result.options = parsed.options
-        result.subcommands = parsed.subcommands
+
+    # Try subcommand discovery (handles pip/npm/git-style listings)
+    subs = parse_subcommands(help_text)
+    if subs:
+        result.subcommands = subs
 
     # TODO: LLM fallback for non-standard formats
     # TODO: Recursive subcommand discovery (for aws, heroku, kubectl, etc.)
